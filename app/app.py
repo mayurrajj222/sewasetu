@@ -14,6 +14,7 @@ import random
 import hashlib
 import configparser
 from datetime import datetime, date, timedelta
+import threading
 
 import requests
 import psycopg2
@@ -76,12 +77,16 @@ def hash_password(p):
     return hashlib.sha256(p.encode("utf-8")).hexdigest()
 
 
-def send_sms(mobile, text):
+def _dispatch_sms(mobile, text):
     try:
         requests.post(SMS_GATEWAY_URL + "/api/send",
-                      json={"to": mobile, "text": text}, timeout=5)
+                      json={"to": mobile, "text": text}, timeout=3)
     except Exception as e:
         app.logger.error("sms gateway error: %s" % e)
+
+
+def send_sms(mobile, text):
+    threading.Thread(target=_dispatch_sms, args=(mobile, text), daemon=True).start()
 
 
 def deadline_remaining():
