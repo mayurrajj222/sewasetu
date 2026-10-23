@@ -1,0 +1,24 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Log archive and extracted logs
+logs/*.log
+logs/*.gz
+logs/*.tar.gz
+logs/README.txt
+
+# Large seed data (as noted in BRIEF.md: code and history needed, not data)
+# seed/seed.sql
+
+# Environment / local scratch
+.env
+.venv
+env/
+venv/
+scratch/
