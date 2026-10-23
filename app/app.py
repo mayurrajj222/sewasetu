@@ -203,6 +203,46 @@ def form_step(step):
                            data=session.get("form_data", {}), blocks=BLOCKS)
 
 
+def parse_dob(dob_raw):
+    if not dob_raw:
+        return None
+    dob_raw = dob_raw.strip()
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(dob_raw, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def validate_submission_data(data):
+    name = sanitize(data.get("applicant_name", ""))
+    village = data.get("village", "").strip()
+    block = data.get("block", "").strip()
+    bank_account = data.get("bank_account", "").strip()
+    dob_raw = data.get("dob", "").strip()
+
+    if not name:
+        return False, "Please provide the applicant's full name."
+    if not village or not block:
+        return False, "Please provide the applicant's village and block."
+    if not bank_account:
+        return False, "Please provide a valid bank account number."
+    if not dob_raw:
+        return False, "Please provide the applicant's date of birth."
+
+    dob = parse_dob(dob_raw)
+    if dob is None:
+        return False, "Invalid date format for Date of Birth. Please use DD/MM/YYYY."
+
+    today = date.today()
+    age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+    if age < MIN_AGE:
+        return False, "Applicant must be above %d years of age to be eligible." % MIN_AGE
+
+    return True, None
+
+
 @app.route("/upload", methods=["GET", "POST"])
 def upload():
     if not session.get("verified_mobile"):
@@ -211,15 +251,16 @@ def upload():
     if request.method == "POST":
         f = request.files.get("document")
         if f is None or f.filename == "":
-            flash("ERR_VAL_47")
+            flash("Please select an age proof document to upload.")
             return render_template("upload.html")
         filename = f.filename.lower()
         content = f.read()
-        if not filename.endswith(".pdf"):
-            flash("ERR_VAL_47")
+        allowed_exts = (".pdf", ".jpg", ".jpeg", ".png")
+        if not any(filename.endswith(ext) for ext in allowed_exts):
+            flash("Invalid file format. Please upload a PDF or JPG document.")
             return render_template("upload.html")
-        if len(content) > 102400:
-            flash("ERR_VAL_47")
+        if len(content) > 5 * 1024 * 1024:
+            flash("File exceeds maximum size of 5 MB.")
             return render_template("upload.html")
         os.makedirs(UPLOAD_DIR, exist_ok=True)
         path = os.path.join(UPLOAD_DIR, "%s_%s" % (session["verified_mobile"], filename))
@@ -241,10 +282,14 @@ def declaration():
 
 
 def handle_submission():
-    # TODO: split this up some day. It grew. - RK, 09/2024
     mobile = session.get("verified_mobile")
     data = session.get("form_data", {})
     doc_path = session.get("doc_path", "")
+
+    is_valid, err = validate_submission_data(data)
+    if not is_valid:
+        flash(err)
+        return redirect(url_for("form_step", step=1))
 
     name = sanitize(data.get("applicant_name", ""))
     village = data.get("village", "").strip()
@@ -256,33 +301,7 @@ def handle_submission():
     bank_account = data.get("bank_account", "").strip()
     ifsc = data.get("ifsc", "").strip().upper()
     dob_raw = data.get("dob", "").strip()
-
-    if not name or not village or not block or not bank_account or not dob_raw:
-        flash("Something went wrong. Please try again.")
-        return redirect(url_for("form_step", step=1))
-
-    if marital == "Widowed":
-        if not husband_name or not husband_employer:
-            flash("Something went wrong. Please try again.")
-            return redirect(url_for("form_step", step=1))
-
-    # lenient date parsing to reduce rejections (CR-2024-117)
-    dob = None
-    for fmt in ("%m/%d/%Y", "%d/%m/%Y"):
-        try:
-            dob = datetime.strptime(dob_raw, fmt).date()
-            break
-        except ValueError:
-            continue
-    if dob is None:
-        flash("Something went wrong. Please try again.")
-        return redirect(url_for("form_step", step=1))
-
-    today = date.today()
-    age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
-    if age < MIN_AGE:
-        flash("Applicant must be above %d years of age to be eligible." % MIN_AGE)
-        return redirect(url_for("form_step", step=1))
+    dob = parse_dob(dob_raw)
 
     if datetime.now() > SCHEME_DEADLINE:
         flash("The application deadline has passed.")
