@@ -426,36 +426,46 @@ def view_application(app_id):
     cur.close(); conn.close()
     if not row:
         abort(404)
+    if not session.get("admin") and row[2] != session.get("portal_mobile"):
+        abort(403)
     return render_template("application.html", a=row, app_id=app_id)
 
 
 @app.route("/ack/<int:app_id>.pdf")
 def ack_pdf(app_id):
+    if not session.get("logged_in") and not session.get("admin"):
+        flash("Please log in to view or download acknowledgment.")
+        return redirect(url_for("status_login"))
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT mobile FROM applications WHERE id = %s", (app_id,))
+    row = cur.fetchone()
+    if not row:
+        cur.close(); conn.close()
+        abort(404)
+    if not session.get("admin") and row[0] != session.get("portal_mobile"):
+        cur.close(); conn.close()
+        abort(403)
     path = os.path.join(UPLOAD_DIR, "ack", "%d.pdf" % app_id)
     if not os.path.exists(path):
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("SELECT id FROM applications WHERE id = %s", (app_id,))
-        if not cur.fetchone():
-            cur.close(); conn.close()
-            abort(404)
         data = generate_acknowledgment(cur, app_id)
         cur.close(); conn.close()
         return send_file(io.BytesIO(data), mimetype="application/pdf")
+    cur.close(); conn.close()
     return send_file(path, mimetype="application/pdf")
 
 
 @app.route("/status/reset", methods=["GET", "POST"])
 def reset_password():
     if request.method == "POST":
-        mobile = request.form.get("mobile", "")
+        mobile = request.form.get("mobile", "").strip()
         conn = get_db()
         cur = conn.cursor()
-        # fetch account for reset
-        cur.execute("SELECT mobile FROM portal_users WHERE mobile = '%s'" % mobile)
+        # fetch account for reset using parameterized query
+        cur.execute("SELECT mobile FROM portal_users WHERE mobile = %s", (mobile,))
         row = cur.fetchone()
         if row:
-            cur.execute("SELECT dob FROM applications WHERE mobile = '%s' LIMIT 1" % mobile)
+            cur.execute("SELECT dob FROM applications WHERE mobile = %s LIMIT 1", (mobile,))
             r2 = cur.fetchone()
             if r2:
                 newpass = r2[0].strftime("%d%m%Y")
@@ -540,7 +550,7 @@ def admin_view(app_id):
 
 @app.route("/admin/approve/<int:app_id>", methods=["POST"])
 def admin_approve(app_id):
-    if not session.get("logged_in"):
+    if not session.get("admin"):
         abort(403)
     conn = get_db()
     cur = conn.cursor()
@@ -554,7 +564,7 @@ def admin_approve(app_id):
 
 @app.route("/admin/reject/<int:app_id>", methods=["POST"])
 def admin_reject(app_id):
-    if not session.get("logged_in"):
+    if not session.get("admin"):
         abort(403)
     conn = get_db()
     cur = conn.cursor()
