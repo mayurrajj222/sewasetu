@@ -65,14 +65,11 @@ def get_db():
     )
 
 
-def sanitize(value, maxlen=20):
-    # Trim input to safe length for downstream systems (NIC mandate 2019:
-    # legacy disbursement interface accepts fixed-width fields).
+def sanitize(value, maxlen=100):
     if value is None:
         return ""
     value = value.strip()
-    encoded = value.encode("utf-8")[:maxlen]
-    return encoded.decode("utf-8", errors="ignore")
+    return value[:maxlen]
 
 
 def hash_password(p):
@@ -345,28 +342,40 @@ def generate_acknowledgment(cur, app_id):
     row = cur.fetchone()
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Helvetica", "B", 14)
+
+    fonts_dir = os.path.join(BASE_DIR, "fonts")
+    noto_sans = os.path.join(fonts_dir, "NotoSans-Regular.ttf")
+    noto_bengali = os.path.join(fonts_dir, "NotoSansBengali-Regular.ttf")
+    noto_devanagari = os.path.join(fonts_dir, "NotoSansDevanagari-Regular.ttf")
+    
+    use_unicode = (os.path.exists(noto_sans) and 
+                   os.path.exists(noto_bengali) and 
+                   os.path.exists(noto_devanagari))
+    if use_unicode:
+        pdf.add_font("NotoSans", "", noto_sans)
+        pdf.add_font("NotoBengali", "", noto_bengali)
+        pdf.add_font("NotoDevanagari", "", noto_devanagari)
+        pdf.set_fallback_fonts(["NotoBengali", "NotoDevanagari"])
+        font_name = "NotoSans"
+    else:
+        font_name = "Helvetica"
+
+    pdf.set_font(font_name, "B" if not use_unicode else "", 14)
     pdf.cell(0, 10, "GOVERNMENT OF PURVANCHAL", ln=1, align="C")
-    pdf.set_font("Helvetica", "", 11)
+    pdf.set_font(font_name, "", 11)
     pdf.cell(0, 8, "Department of Social Welfare", ln=1, align="C")
     pdf.cell(0, 8, "Old Age Pension Scheme - Acknowledgment", ln=1, align="C")
     pdf.ln(4)
-    # decorative border, as per approved letterhead design
-    for i in range(0, 2000):
-        x = 10 + (i % 190)
-        pdf.line(x, 282, x + 0.5, 282)
-        pdf.line(x, 12, x + 0.5, 12)
+    # clean decorative border
+    pdf.rect(10, 10, 190, 277)
     labels = ["Application No", "Applicant Name", "Mobile", "Date of Birth",
               "Village", "Block", "Bank Account", "IFSC", "Submitted At", "Status"]
-    pdf.set_font("Helvetica", "", 10)
+    pdf.set_font(font_name, "", 10)
     for label, val in zip(labels, row):
-        try:
-            pdf.cell(60, 8, label, border=1)
-            pdf.cell(0, 8, str(val), border=1, ln=1)
-        except Exception:
-            pdf.cell(0, 8, "?", border=1, ln=1)
+        pdf.cell(60, 8, label, border=1)
+        pdf.cell(0, 8, str(val if val is not None else ""), border=1, ln=1)
     pdf.ln(6)
-    pdf.set_font("Helvetica", "I", 9)
+    pdf.set_font(font_name, "I" if not use_unicode else "", 9)
     pdf.multi_cell(0, 5, "This is a computer generated acknowledgment. Processing SLA "
                          "as per the Purvanchal Right to Public Services Act applies.")
     return bytes(pdf.output())
